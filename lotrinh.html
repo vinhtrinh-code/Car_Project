@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#0b1220">
+<title>VT_Car · Lộ trình</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#0b1220;--panel:#121b2e;--line:#22304d;--txt:#e8eefc;--mute:#8a9bbd;--acc:#3aa0ff;--ok:#33d17a;--warn:#ffb020;--bad:#ff5a5f}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif}
+body{display:flex;flex-direction:column}
+header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+.logo{font-weight:800;font-size:19px;margin-right:auto}
+.logo b{color:var(--acc)}
+.logo span{color:#ff8a1e}
+.ib{background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:10px;width:38px;height:38px;font-size:18px;margin-left:6px}
+.bar{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.bar input[type=date]{background:#0e1626;color:var(--txt);border:1px solid var(--line);border-radius:10px;height:38px;padding:0 10px;font-size:15px;margin:0 6px;color-scheme:dark}
+.chips{display:flex;margin-left:auto}
+.chip{border:1px solid var(--line);background:transparent;color:var(--mute);padding:8px 12px;border-radius:20px;font-size:14px;margin-left:6px}
+.chip.on{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.stats{display:flex;padding:8px 6px;border-bottom:1px solid var(--line);overflow-x:auto}
+.st{flex:1;min-width:78px;margin:0 6px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:8px 10px}
+.st small{display:block;color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.st b{font-size:18px}
+#map{flex:1;min-height:260px;background:#0e1626}
+#list{max-height:34vh;overflow:auto;border-top:1px solid var(--line);background:var(--panel)}
+.it{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--line);font-size:14px}
+.it i{width:28px;height:28px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;margin-right:10px;font-style:normal;font-size:14px;flex:none}
+.it .t{color:var(--mute);margin-left:auto;padding-left:8px;white-space:nowrap}
+.msg{padding:14px;color:var(--mute);font-size:14px}
+.legend{display:flex;padding:6px 12px;font-size:12px;color:var(--mute);background:var(--panel);border-top:1px solid var(--line)}
+.legend span{display:inline-flex;align-items:center;margin-right:12px}
+.legend em{width:16px;height:4px;border-radius:2px;margin-right:4px;display:inline-block}
+#cfg{position:fixed;left:0;top:0;right:0;bottom:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:2000}
+#cfg .box{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px;width:92%;max-width:440px}
+#cfg label{display:block;color:var(--mute);font-size:13px;margin:10px 0 4px}
+#cfg input{width:100%;height:40px;border-radius:10px;border:1px solid var(--line);background:#0e1626;color:var(--txt);padding:0 10px;font-size:14px}
+#cfg .row{display:flex;justify-content:flex-end;margin-top:14px}
+#cfg button{height:40px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--txt);padding:0 16px;margin-left:8px;font-size:15px}
+#cfg button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
+.leaflet-popup-content{font-size:13px;line-height:1.5}
+.pin{width:26px;height:26px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">VT<span>_</span>Car · <b>Lộ trình</b></div>
+  <button class="ib" id="btnReload" title="Tải lại">⟳</button>
+  <button class="ib" id="btnCfg" title="Cài đặt">⚙</button>
+</header>
+<div class="bar">
+  <button class="ib" id="prev" style="margin:0">‹</button>
+  <input type="date" id="day">
+  <button class="ib" id="next" style="margin:0">›</button>
+  <div class="chips" id="chips">
+    <button class="chip on" data-d="">Tất cả</button>
+    <button class="chip" data-d="ZT">ZT</button>
+    <button class="chip" data-d="S21">S21</button>
+  </div>
+</div>
+<div class="stats">
+  <div class="st"><small>Quãng đường</small><b id="sKm">—</b></div>
+  <div class="st"><small>Thời gian chạy</small><b id="sRun">—</b></div>
+  <div class="st"><small>Tốc độ tối đa</small><b id="sMax">—</b></div>
+  <div class="st"><small>Điểm dừng</small><b id="sStop">—</b></div>
+</div>
+<div id="map"></div>
+<div class="legend">
+  <span><em style="background:#33d17a"></em>&lt;40</span>
+  <span><em style="background:#3aa0ff"></em>40–70</span>
+  <span><em style="background:#ffb020"></em>70–90</span>
+  <span><em style="background:#ff5a5f"></em>&gt;90 km/h</span>
+</div>
+<div id="list"><div class="msg">Đang tải…</div></div>
+
+<div id="cfg"><div class="box">
+  <b>Kết nối Google Sheet</b>
+  <label>URL Apps Script (/exec)</label><input id="cUrl" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+  <label>Mã khóa Sheet</label><input id="cKey" autocomplete="off" placeholder="vt…">
+  <div style="color:var(--mute);font-size:12px;margin-top:8px">Chỉ lưu trên trình duyệt này, không gửi đi đâu khác.</div>
+  <div class="row"><button id="cCancel">Đóng</button><button class="pri" id="cSave">Lưu</button></div>
+</div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+var TZ='Asia/Ho_Chi_Minh',$=function(i){return document.getElementById(i)};
+var store={get:function(k){try{return localStorage.getItem(k)||''}catch(e){return ''}},set:function(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+// one-time setup via link: lotrinh.html#u=<url>&k=<key>
+(function(){var h=location.hash.slice(1);if(!h)return;var p={};h.split('&').forEach(function(x){var i=x.indexOf('=');if(i>0)p[x.slice(0,i)]=decodeURIComponent(x.slice(i+1))});
+  if(p.u)store.set('vt_url',p.u);if(p.k)store.set('vt_key',p.k);history.replaceState(null,'',location.pathname)})();
+
+function today(){return new Date(Date.now()+7*3600e3).toISOString().slice(0,10)}
+function shift(d,n){var t=new Date(d+'T00:00:00Z');t.setUTCDate(t.getUTCDate()+n);return t.toISOString().slice(0,10)}
+function hm(t){return new Date(t).toLocaleTimeString('vi-VN',{hour:'2-digit',minute:'2-digit',timeZone:TZ})}
+function dur(ms){var m=Math.round(ms/60000);return m<60?m+' phút':Math.floor(m/60)+' giờ '+(m%60?m%60+' phút':'')}
+function dist(a,b){var R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dn=(b.lon-a.lon)*r,x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dn/2)*Math.sin(dn/2);return 2*R*Math.asin(Math.sqrt(x))}
+function col(s){return s<40?'#33d17a':s<70?'#3aa0ff':s<90?'#ffb020':'#ff5a5f'}
+function pin(bg,ch){return L.divIcon({className:'',html:'<div class="pin" style="background:'+bg+'">'+ch+'</div>',iconSize:[26,26],iconAnchor:[13,13]})}
+var EV={NO_MAY:['#33d17a','▶','Nổ máy'],TAT_MAY:['#ff5a5f','■','Tắt máy'],QUA_TOC_DO:['#ffb020','!','Quá tốc độ'],THU:['#8a9bbd','✓','Gửi thử']};
+
+var map=L.map('map',{zoomControl:true}).setView([11.94,108.44],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+var layer=L.layerGroup().addTo(map),dev=store.get('vt_dev'),day=today();
+
+function setChips(){[].forEach.call($('chips').children,function(b){b.className='chip'+(b.getAttribute('data-d')===dev?' on':'')})}
+$('chips').onclick=function(e){var d=e.target.getAttribute('data-d');if(d===null)return;dev=d;store.set('vt_dev',d);setChips();load()};
+$('day').value=day;$('day').onchange=function(){day=this.value||today();load()};
+$('prev').onclick=function(){day=shift(day,-1);$('day').value=day;load()};
+$('next').onclick=function(){day=shift(day,1);$('day').value=day;load()};
+$('btnReload').onclick=function(){load()};
+function openCfg(){$('cUrl').value=store.get('vt_url');$('cKey').value=store.get('vt_key');$('cfg').style.display='flex'}
+$('btnCfg').onclick=openCfg;$('cCancel').onclick=function(){$('cfg').style.display='none'};
+$('cSave').onclick=function(){store.set('vt_url',$('cUrl').value.trim());store.set('vt_key',$('cKey').value.trim());$('cfg').style.display='none';load()};
+
+function msg(t){$('list').innerHTML='<div class="msg">'+t+'</div>'}
+
+function load(){
+  var u=store.get('vt_url'),k=store.get('vt_key');
+  if(!u||!k){msg('Bấm ⚙ để nhập URL Apps Script và mã khóa Sheet.');openCfg();return}
+  msg('Đang tải lộ trình ngày '+day.split('-').reverse().join('/')+'…');
+  var q=u+(u.indexOf('?')<0?'?':'&')+'key='+encodeURIComponent(k)+'&date='+day+(dev?'&dev='+encodeURIComponent(dev):'');
+  fetch(q).then(function(r){return r.json()}).then(function(d){
+    if(!d.ok){msg('Sai mã khóa Sheet – bấm ⚙ để sửa.');return}
+    draw(d);
+  }).catch(function(e){msg('Không tải được dữ liệu ('+e.message+'). Kiểm tra mạng hoặc URL Apps Script.')});
+}
+
+function draw(d){
+  layer.clearLayers();
+  var p=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'}).sort(function(a,b){return a.t-b.t});
+  var items=[];
+  if(!p.length){
+    ['sKm','sRun','sMax','sStop'].forEach(function(i){$(i).textContent='—'});
+    if(d.last&&typeof d.last.lat==='number'){
+      L.marker([d.last.lat,d.last.lon],{icon:pin('#3aa0ff','P')}).addTo(layer).bindPopup('<b>Vị trí cuối cùng</b><br>'+new Date(d.last.t).toLocaleString('vi-VN',{timeZone:TZ})+(d.last.dev?'<br>'+d.last.dev:''));
+      map.setView([d.last.lat,d.last.lon],15);
+      msg('Không có dữ liệu ngày này. Ghim xanh là vị trí cuối cùng đã ghi ('+new Date(d.last.t).toLocaleString('vi-VN',{timeZone:TZ})+').');
+    } else msg('Không có dữ liệu ngày này.');
+    return;
+  }
+  var km=0,run=0,max=0,seg=[],stops=[],stopStart=null,GAP=5*60e3;
+  function flushSeg(){if(seg.length>1)L.polyline(seg.map(function(x){return[x.lat,x.lon]}),{color:col(seg[seg.length-1].spd||0),weight:5,opacity:.9}).addTo(layer);seg=seg.length?[seg[seg.length-1]]:[]}
+  for(var i=0;i<p.length;i++){
+    var c=p[i],s=+c.spd||0;if(s>max)max=s;
+    if(i>0){
+      var a=p[i-1],dt=c.t-a.t,dk=dist(a,c),v=dt>0?dk/(dt/3600e3):0;
+      if(dt>GAP){flushSeg();seg=[];}
+      else if(v<180){km+=dk;if(s>=5||(+a.spd||0)>=5)run+=dt;}
+      // colour changes by speed band
+    }
+    if(seg.length&&col(s)!==col(+seg[seg.length-1].spd||0)){seg.push(c);flushSeg()}
+    else seg.push(c);
+    // stops: speed<5 for >=3 min, or a gap (screen off) >=5 min
+    var slow=s<5;
+    if(slow&&stopStart===null)stopStart=i;
+    if((!slow||i===p.length-1)&&stopStart!==null){var e=slow?i:i-1;if(p[e].t-p[stopStart].t>=180e3)stops.push({a:p[stopStart],b:p[e]});stopStart=null}
+    if(i>0&&c.t-p[i-1].t>GAP)stops.push({a:p[i-1],b:c,gap:1});
+    if(EV[c.ev]){var ev=EV[c.ev];L.marker([c.lat,c.lon],{icon:pin(ev[0],ev[1])}).addTo(layer).bindPopup('<b>'+ev[2]+'</b><br>'+hm(c.t)+(c.dev?' · '+c.dev:''));items.push({t:c.t,ic:ev[1],bg:ev[0],tx:ev[2]+(c.ev==='QUA_TOC_DO'?' – '+s+' km/h':''),ll:[c.lat,c.lon]})}
+  }
+  flushSeg();
+  stops.forEach(function(st){var m=st.a;items.push({t:m.t,ic:'P',bg:'#6b5bff',tx:'Dừng '+dur(st.b.t-st.a.t)+' ('+hm(st.a.t)+'–'+hm(st.b.t)+')',ll:[m.lat,m.lon]});
+    L.marker([m.lat,m.lon],{icon:pin('#6b5bff','P')}).addTo(layer).bindPopup('<b>Dừng '+dur(st.b.t-st.a.t)+'</b><br>'+hm(st.a.t)+' – '+hm(st.b.t))});
+  var f=p[0],l=p[p.length-1];
+  L.marker([f.lat,f.lon],{icon:pin('#33d17a','A')}).addTo(layer).bindPopup('<b>Bắt đầu</b><br>'+hm(f.t));
+  L.marker([l.lat,l.lon],{icon:pin('#ff8a1e','B')}).addTo(layer).bindPopup('<b>Điểm cuối</b><br>'+hm(l.t)+(l.dev?' · '+l.dev:''));
+  items.push({t:f.t,ic:'A',bg:'#33d17a',tx:'Bắt đầu ghi',ll:[f.lat,f.lon]});
+  items.push({t:l.t,ic:'B',bg:'#ff8a1e',tx:'Điểm cuối',ll:[l.lat,l.lon]});
+  map.fitBounds(L.latLngBounds(p.map(function(x){return[x.lat,x.lon]})).pad(.15),{maxZoom:16});
+  $('sKm').textContent=km<10?km.toFixed(1)+' km':Math.round(km)+' km';
+  $('sRun').textContent=run?dur(run):'0 phút';
+  $('sMax').textContent=Math.round(max)+' km/h';
+  $('sStop').textContent=stops.length;
+  items.sort(function(a,b){return b.t-a.t});
+  $('list').innerHTML=items.map(function(x,j){return '<div class="it" data-j="'+j+'"><i style="background:'+x.bg+'">'+x.ic+'</i>'+x.tx+'<span class="t">'+hm(x.t)+'</span></div>'}).join('')
+    +'<div class="msg">'+p.length+' điểm GPS · '+(dev||'tất cả thiết bị')+'</div>';
+  [].forEach.call($('list').querySelectorAll('.it'),function(el){el.onclick=function(){var x=items[+el.getAttribute('data-j')];map.setView(x.ll,17)}});
+}
+setChips();load();
+</script>
+</body>
+</html>
