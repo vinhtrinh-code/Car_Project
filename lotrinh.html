@@ -43,6 +43,25 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
 #cfg button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
 .leaflet-popup-content{font-size:13px;line-height:1.5}
 .pin{width:26px;height:26px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)}
+
+/* layout: side panel + map */
+#wrap{flex:1;display:flex;flex-direction:column;min-height:0}
+#side{display:flex;flex-direction:column;min-height:0;order:2}
+#mainmap{position:relative;order:1;height:52vh;min-height:280px;display:flex;flex-direction:column}
+#mainmap #map{flex:1}
+.legend{position:absolute;left:10px;bottom:22px;z-index:500;border:1px solid var(--line);border-radius:10px;background:rgba(18,27,46,.92)}
+.stats{flex-wrap:wrap}
+.st{min-width:calc(50% - 12px);flex:0 0 calc(50% - 12px);margin:4px 6px}
+#list{max-height:none;flex:1}
+@media (min-width:900px){
+  html,body{height:100%;overflow:hidden}
+  #wrap{flex-direction:row}
+  #side{order:1;width:380px;flex:none;border-right:1px solid var(--line);background:var(--bg)}
+  #mainmap{order:2;flex:1;height:auto}
+  .chips{margin-left:0;margin-top:8px;width:100%}
+  .chips .chip:first-child{margin-left:0}
+  #list{overflow:auto}
+}
 </style>
 </head>
 <body>
@@ -51,6 +70,8 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
   <button class="ib" id="btnReload" title="Tải lại">⟳</button>
   <button class="ib" id="btnCfg" title="Cài đặt">⚙</button>
 </header>
+<div id="wrap">
+<aside id="side">
 <div class="bar">
   <button class="ib" id="prev" style="margin:0">‹</button>
   <input type="date" id="day">
@@ -67,6 +88,9 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
   <div class="st"><small>Tốc độ tối đa</small><b id="sMax">—</b></div>
   <div class="st"><small>Điểm dừng</small><b id="sStop">—</b></div>
 </div>
+<div id="list"><div class="msg">Đang tải…</div></div>
+</aside>
+<main id="mainmap">
 <div id="map"></div>
 <div class="legend">
   <span><em style="background:#33d17a"></em>&lt;40</span>
@@ -74,7 +98,8 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
   <span><em style="background:#ffb020"></em>70–90</span>
   <span><em style="background:#ff5a5f"></em>&gt;90 km/h</span>
 </div>
-<div id="list"><div class="msg">Đang tải…</div></div>
+</main>
+</div>
 
 <div id="cfg"><div class="box">
   <b>Kết nối Google Sheet</b>
@@ -103,6 +128,7 @@ var EV={NO_MAY:['#33d17a','▶','Nổ máy'],TAT_MAY:['#ff5a5f','■','Tắt má
 
 var map=L.map('map',{zoomControl:true}).setView([11.94,108.44],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+window.addEventListener('resize',function(){map.invalidateSize()});
 var layer=L.layerGroup().addTo(map),dev=store.get('vt_dev'),day=today();
 
 function setChips(){[].forEach.call($('chips').children,function(b){b.className='chip'+(b.getAttribute('data-d')===dev?' on':'')})}
