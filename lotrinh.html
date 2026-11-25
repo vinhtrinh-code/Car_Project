@@ -169,6 +169,25 @@ function clean(all){
 }
 function nearest(r,t){var best=r[0];for(var i=1;i<r.length;i++)if(Math.abs(r[i].t-t)<Math.abs(best.t-t))best=r[i];return best}
 
+// Chaikin corner-cutting: rounds the corners between points (display only; data unchanged)
+function smooth(pts,iter){
+  var a=pts.map(function(x){return {lat:x.lat,lon:x.lon,spd:+x.spd||0}});
+  for(var k=0;k<iter;k++){if(a.length<3)break;var b=[a[0]];
+    for(var i=0;i<a.length-1;i++){var P=a[i],Q=a[i+1];
+      b.push({lat:.75*P.lat+.25*Q.lat,lon:.75*P.lon+.25*Q.lon,spd:P.spd});
+      b.push({lat:.25*P.lat+.75*Q.lat,lon:.25*P.lon+.75*Q.lon,spd:Q.spd});}
+    b.push(a[a.length-1]);a=b;}
+  return a;
+}
+function drawRun(r){
+  if(r.length<2)return;
+  var sm=smooth(r,3),seg=[sm[0]];
+  for(var i=1;i<sm.length;i++){seg.push(sm[i]);
+    if(i===sm.length-1||col(sm[i].spd)!==col(seg[0].spd)){
+      L.polyline(seg.map(function(x){return[x.lat,x.lon]}),{color:col(seg[seg.length-1].spd),weight:5,opacity:.9,lineJoin:'round',lineCap:'round'}).addTo(layer);
+      seg=[sm[i]];}}
+}
+
 function draw(d){
   layer.clearLayers();
   var all=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'}).sort(function(a,b){return a.t-b.t});
@@ -183,22 +202,20 @@ function draw(d){
     } else msg('Không có dữ liệu ngày này.');
     return;
   }
-  var km=0,run=0,max=0,seg=[],raw=[],stopStart=null,GAP=5*60e3;
-  function flushSeg(){if(seg.length>1)L.polyline(seg.map(function(x){return[x.lat,x.lon]}),{color:col(seg[seg.length-1].spd||0),weight:5,opacity:.9}).addTo(layer);seg=seg.length?[seg[seg.length-1]]:[]}
+  var km=0,run=0,max=0,runs=[[]],raw=[],stopStart=null,GAP=5*60e3;
   for(var i=0;i<p.length;i++){
     var c=p[i],s=+c.spd||0;if(s>max&&(!c.acc||c.acc<=30))max=s;
     if(i>0){
       var a=p[i-1],dt=c.t-a.t,dk=dist(a,c),v=dt>0?dk/(dt/3600e3):0;
-      if(dt>GAP){flushSeg();seg=[];raw.push({a:a,b:c});}
+      if(dt>GAP){runs.push([]);raw.push({a:a,b:c});}
       else if(v<180){km+=dk;if(s>=5||(+a.spd||0)>=5)run+=dt;}
     }
-    if(seg.length&&col(s)!==col(+seg[seg.length-1].spd||0)){seg.push(c);flushSeg()}
-    else seg.push(c);
+    runs[runs.length-1].push(c);
     var slow=s<5;
     if(slow&&stopStart===null)stopStart=i;
     if((!slow||i===p.length-1)&&stopStart!==null){raw.push({a:p[stopStart],b:p[i]});stopStart=null}   // a stop lasts until the car moves again
   }
-  flushSeg();
+  runs.forEach(drawRun);
   // merge overlapping / near stops (less than 3 min apart, within 150 m), keep those ≥ 3 min
   raw.sort(function(x,y){return x.a.t-y.a.t});
   var stops=[];
