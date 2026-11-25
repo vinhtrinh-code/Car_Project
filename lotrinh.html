@@ -99,7 +99,7 @@ function dur(ms){var m=Math.round(ms/60000);return m<60?m+' phút':Math.floor(m/
 function dist(a,b){var R=6371,r=Math.PI/180,dl=(b.lat-a.lat)*r,dn=(b.lon-a.lon)*r,x=Math.sin(dl/2)*Math.sin(dl/2)+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dn/2)*Math.sin(dn/2);return 2*R*Math.asin(Math.sqrt(x))}
 function col(s){return s<40?'#33d17a':s<70?'#3aa0ff':s<90?'#ffb020':'#ff5a5f'}
 function pin(bg,ch){return L.divIcon({className:'',html:'<div class="pin" style="background:'+bg+'">'+ch+'</div>',iconSize:[26,26],iconAnchor:[13,13]})}
-var EV={NO_MAY:['#33d17a','▶','Nổ máy'],TAT_MAY:['#ff5a5f','■','Tắt máy'],QUA_TOC_DO:['#ffb020','!','Quá tốc độ'],THU:['#8a9bbd','✓','Gửi thử']};
+var EV={NO_MAY:['#33d17a','▶','Nổ máy'],TAT_MAY:['#ff5a5f','■','Tắt máy'],QUA_TOC_DO:['#ffb020','!','Quá tốc độ'],THU:['#8a9bbd','✓','Gửi thử'],TU_KHOI_DONG:['#00b8a9','♻','Tự khởi động lại']};
 
 var map=L.map('map',{zoomControl:true}).setView([11.94,108.44],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
@@ -130,7 +130,7 @@ function load(){
 
 function draw(d){
   layer.clearLayers();
-  var p=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'}).sort(function(a,b){return a.t-b.t});
+  var p=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'&&(!x.acc||x.acc<=60||EV[x.ev])}).sort(function(a,b){return a.t-b.t});
   var items=[];
   if(!p.length){
     ['sKm','sRun','sMax','sStop'].forEach(function(i){$(i).textContent='—'});
