@@ -154,9 +154,25 @@ function load(){
   }).catch(function(e){msg('Không tải được dữ liệu ('+e.message+'). Kiểm tra mạng hoặc URL Apps Script.')});
 }
 
+function clean(all){
+  // 1) usable route points: good accuracy only
+  var r=all.filter(function(x){return !x.acc||x.acc<=60});
+  // 2) where GPS-grade fixes exist (≤15 m), drop coarse ones (>25 m) within 60 s of them
+  var good=r.filter(function(x){return x.acc&&x.acc<=15}).map(function(x){return x.t});
+  if(good.length)r=r.filter(function(x){if(!x.acc||x.acc<=25)return true;for(var i=0;i<good.length;i++)if(Math.abs(good[i]-x.t)<60e3)return false;return true});
+  // 3) remove spikes: a point that jumps out and straight back
+  var changed=true;
+  while(changed&&r.length>2){changed=false;
+    for(var i=1;i<r.length-1;i++){var A=r[i-1],B=r[i],C=r[i+1],ab=dist(A,B),bc=dist(B,C),ac=dist(A,C),tol=((B.acc||10)+30)/1000;
+      if(ab+bc>2*ac+tol&&ab>tol&&bc>tol&&(B.acc||0)>10){r.splice(i,1);changed=true;break}}}
+  return r;
+}
+function nearest(r,t){var best=r[0];for(var i=1;i<r.length;i++)if(Math.abs(r[i].t-t)<Math.abs(best.t-t))best=r[i];return best}
+
 function draw(d){
   layer.clearLayers();
-  var p=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'&&(!x.acc||x.acc<=60||EV[x.ev])}).sort(function(a,b){return a.t-b.t});
+  var all=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'}).sort(function(a,b){return a.t-b.t});
+  var p=clean(all);
   var items=[];
   if(!p.length){
     ['sKm','sRun','sMax','sStop'].forEach(function(i){$(i).textContent='—'});
@@ -167,28 +183,34 @@ function draw(d){
     } else msg('Không có dữ liệu ngày này.');
     return;
   }
-  var km=0,run=0,max=0,seg=[],stops=[],stopStart=null,GAP=5*60e3;
+  var km=0,run=0,max=0,seg=[],raw=[],stopStart=null,GAP=5*60e3;
   function flushSeg(){if(seg.length>1)L.polyline(seg.map(function(x){return[x.lat,x.lon]}),{color:col(seg[seg.length-1].spd||0),weight:5,opacity:.9}).addTo(layer);seg=seg.length?[seg[seg.length-1]]:[]}
   for(var i=0;i<p.length;i++){
-    var c=p[i],s=+c.spd||0;if(s>max)max=s;
+    var c=p[i],s=+c.spd||0;if(s>max&&(!c.acc||c.acc<=30))max=s;
     if(i>0){
       var a=p[i-1],dt=c.t-a.t,dk=dist(a,c),v=dt>0?dk/(dt/3600e3):0;
-      if(dt>GAP){flushSeg();seg=[];}
+      if(dt>GAP){flushSeg();seg=[];raw.push({a:a,b:c});}
       else if(v<180){km+=dk;if(s>=5||(+a.spd||0)>=5)run+=dt;}
-      // colour changes by speed band
     }
     if(seg.length&&col(s)!==col(+seg[seg.length-1].spd||0)){seg.push(c);flushSeg()}
     else seg.push(c);
-    // stops: speed<5 for >=3 min, or a gap (screen off) >=5 min
     var slow=s<5;
     if(slow&&stopStart===null)stopStart=i;
-    if((!slow||i===p.length-1)&&stopStart!==null){var e=slow?i:i-1;if(p[e].t-p[stopStart].t>=180e3)stops.push({a:p[stopStart],b:p[e]});stopStart=null}
-    if(i>0&&c.t-p[i-1].t>GAP)stops.push({a:p[i-1],b:c,gap:1});
-    if(EV[c.ev]){var ev=EV[c.ev];L.marker([c.lat,c.lon],{icon:pin(ev[0],ev[1])}).addTo(layer).bindPopup('<b>'+ev[2]+'</b><br>'+hm(c.t)+(c.dev?' · '+c.dev:''));items.push({t:c.t,ic:ev[1],bg:ev[0],tx:ev[2]+(c.ev==='QUA_TOC_DO'?' – '+s+' km/h':''),ll:[c.lat,c.lon]})}
+    if((!slow||i===p.length-1)&&stopStart!==null){raw.push({a:p[stopStart],b:p[i]});stopStart=null}   // a stop lasts until the car moves again
   }
   flushSeg();
+  // merge overlapping / near stops (less than 3 min apart, within 150 m), keep those ≥ 3 min
+  raw.sort(function(x,y){return x.a.t-y.a.t});
+  var stops=[];
+  raw.forEach(function(st){var q=stops[stops.length-1];
+    if(q&&st.a.t-q.b.t<180e3&&dist(q.a,st.a)<0.15){if(st.b.t>q.b.t)q.b=st.b}else stops.push({a:st.a,b:st.b})});
+  stops=stops.filter(function(st){return st.b.t-st.a.t>=180e3});
   stops.forEach(function(st){var m=st.a;items.push({t:m.t,ic:'P',bg:'#6b5bff',tx:'Dừng '+dur(st.b.t-st.a.t)+' ('+hm(st.a.t)+'–'+hm(st.b.t)+')',ll:[m.lat,m.lon]});
     L.marker([m.lat,m.lon],{icon:pin('#6b5bff','P')}).addTo(layer).bindPopup('<b>Dừng '+dur(st.b.t-st.a.t)+'</b><br>'+hm(st.a.t)+' – '+hm(st.b.t))});
+  // events: coarse ones are pinned to the nearest clean point in time
+  all.forEach(function(c){if(!EV[c.ev])return;var ev=EV[c.ev],at=(c.acc&&c.acc>60)?nearest(p,c.t):c;
+    L.marker([at.lat,at.lon],{icon:pin(ev[0],ev[1])}).addTo(layer).bindPopup('<b>'+ev[2]+'</b><br>'+hm(c.t)+(c.dev?' · '+c.dev:''));
+    items.push({t:c.t,ic:ev[1],bg:ev[0],tx:ev[2]+(c.ev==='QUA_TOC_DO'?' – '+(+c.spd||0)+' km/h':''),ll:[at.lat,at.lon]})});
   var f=p[0],l=p[p.length-1];
   L.marker([f.lat,f.lon],{icon:pin('#33d17a','A')}).addTo(layer).bindPopup('<b>Bắt đầu</b><br>'+hm(f.t));
   L.marker([l.lat,l.lon],{icon:pin('#ff8a1e','B')}).addTo(layer).bindPopup('<b>Điểm cuối</b><br>'+hm(l.t)+(l.dev?' · '+l.dev:''));
@@ -201,7 +223,7 @@ function draw(d){
   $('sStop').textContent=stops.length;
   items.sort(function(a,b){return b.t-a.t});
   $('list').innerHTML=items.map(function(x,j){return '<div class="it" data-j="'+j+'"><i style="background:'+x.bg+'">'+x.ic+'</i>'+x.tx+'<span class="t">'+hm(x.t)+'</span></div>'}).join('')
-    +'<div class="msg">'+p.length+' điểm GPS · '+(dev||'tất cả thiết bị')+'</div>';
+    +'<div class="msg">'+p.length+' điểm dùng để vẽ (bỏ '+(all.length-p.length)+' điểm sai lệch) · '+(dev||'tất cả thiết bị')+'</div>';
   [].forEach.call($('list').querySelectorAll('.it'),function(el){el.onclick=function(){var x=items[+el.getAttribute('data-j')];map.setView(x.ll,17)}});
 }
 setChips();load();
