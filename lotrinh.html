@@ -42,6 +42,15 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
 #cfg button{height:40px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--txt);padding:0 16px;margin-left:8px;font-size:15px}
 #cfg button.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}
 .leaflet-popup-content{font-size:13px;line-height:1.5}
+.trips{padding:6px 8px 2px;border-bottom:1px solid var(--line)}
+.trips h4{margin:6px 6px 8px;font-size:12px;color:var(--mute);text-transform:uppercase;letter-spacing:.5px;display:flex;align-items:center}
+.trips h4 button{margin-left:auto;background:transparent;border:1px solid var(--line);color:var(--txt);border-radius:14px;padding:4px 10px;font-size:12px;text-transform:none;letter-spacing:0}
+.tr{border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:12px;background:var(--panel);padding:9px 12px;margin:0 6px 8px;cursor:pointer}
+.tr.on{border-color:var(--acc);background:#16284a}
+.tr .h{display:flex;font-weight:700;font-size:14px}
+.tr .h span{margin-left:auto;color:var(--mute);font-weight:400}
+.tr .d{color:var(--mute);font-size:13px;margin-top:3px}
+.tr .w{color:var(--warn)}
 .pin{width:26px;height:26px;border-radius:50%;border:2px solid #fff;display:flex;align-items:center;justify-content:center;font-size:13px;color:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5)}
 
 /* layout: side panel + map */
@@ -88,6 +97,7 @@ header{display:flex;align-items:center;padding:10px 12px;border-bottom:1px solid
   <div class="st"><small>Tốc độ tối đa</small><b id="sMax">—</b></div>
   <div class="st"><small>Điểm dừng</small><b id="sStop">—</b></div>
 </div>
+<div class="trips" id="trips"></div>
 <div id="list"><div class="msg">Đang tải…</div></div>
 </aside>
 <main id="mainmap">
@@ -188,13 +198,56 @@ function drawRun(r){
       seg=[sm[i]];}}
 }
 
-function draw(d){
-  layer.clearLayers();
+var DATA=null,SEL=-1,TRIP_STOP=10*60e3,TRIP_COLORS=['#3aa0ff','#b07cff','#00c2a8','#ff8a1e','#ff5a8a','#c8d000'];
+
+// km / driving time / max speed over a list of clean points
+function stat(a){
+  var km=0,run=0,max=0,GAP=5*60e3;
+  for(var i=0;i<a.length;i++){var c=a[i],s=+c.spd||0;if(s>max&&(!c.acc||c.acc<=30))max=s;
+    if(i>0){var b=a[i-1],dt=c.t-b.t,dk=dist(b,c),v=dt>0?dk/(dt/3600e3):0;
+      if(dt<=GAP&&v<180){km+=dk;if(s>=5||(+b.spd||0)>=5)run+=dt;}}}
+  return {km:km,run:run,max:max,avg:run?km/(run/3600e3):0};
+}
+function fmtKm(km){return (km<10?km.toFixed(1):Math.round(km))+' km'}
+
+function draw(d){DATA=prep(d);SEL=-1;render(true)}
+
+function prep(d){
   var all=(d.pts||[]).filter(function(x){return typeof x.lat==='number'&&typeof x.lon==='number'}).sort(function(a,b){return a.t-b.t});
   var p=clean(all);
-  var items=[];
-  if(!p.length){
+  if(!p.length)return {empty:true,d:d,all:all};
+  // stops: from the moment speed drops under 5 km/h until the car moves again; data gaps count as stops too
+  var raw=[],stopStart=null,GAP=5*60e3;
+  for(var i=0;i<p.length;i++){var c=p[i],slow=(+c.spd||0)<5;
+    if(i>0&&c.t-p[i-1].t>GAP)raw.push({a:p[i-1],b:c});
+    if(slow&&stopStart===null)stopStart=i;
+    if((!slow||i===p.length-1)&&stopStart!==null){raw.push({a:p[stopStart],b:p[i]});stopStart=null}}
+  raw.sort(function(x,y){return x.a.t-y.a.t});
+  var stops=[];
+  raw.forEach(function(st){var q=stops[stops.length-1];
+    if(q&&st.a.t-q.b.t<180e3&&dist(q.a,st.a)<0.15){if(st.b.t>q.b.t)q.b=st.b}else stops.push({a:st.a,b:st.b})});
+  stops=stops.filter(function(st){return st.b.t-st.a.t>=180e3});
+  // trips: split at every stop (or data gap) of 10 minutes or more
+  var longS=stops.filter(function(st){return st.b.t-st.a.t>=TRIP_STOP}),trips=[],cur=[];
+  function close(){if(cur.length>=2){var t=stat(cur);if(t.km>=0.3){t.pts=cur;t.t0=cur[0].t;t.t1=cur[cur.length-1].t;trips.push(t)}}cur=[]}
+  for(var j=0;j<p.length;j++){var c2=p[j];
+    if(j>0&&c2.t-p[j-1].t>TRIP_STOP)close();
+    var inside=longS.some(function(st){return c2.t>st.a.t&&c2.t<st.b.t});
+    if(inside){close();continue}
+    cur.push(c2);
+    if(longS.some(function(st){return c2.t===st.a.t}))close();}
+  close();
+  trips.forEach(function(t){t.over=all.filter(function(x){return x.ev==='QUA_TOC_DO'&&x.t>=t.t0-60e3&&x.t<=t.t1+60e3}).length});
+  return {d:d,all:all,p:p,stops:stops,trips:trips,day:stat(p)};
+}
+
+function render(fit){
+  layer.clearLayers();
+  var D=DATA,items=[];
+  if(D.empty){
+    $('trips').innerHTML='';
     ['sKm','sRun','sMax','sStop'].forEach(function(i){$(i).textContent='—'});
+    var d=D.d;
     if(d.last&&typeof d.last.lat==='number'){
       L.marker([d.last.lat,d.last.lon],{icon:pin('#3aa0ff','P')}).addTo(layer).bindPopup('<b>Vị trí cuối cùng</b><br>'+new Date(d.last.t).toLocaleString('vi-VN',{timeZone:TZ})+(d.last.dev?'<br>'+d.last.dev:''));
       map.setView([d.last.lat,d.last.lon],15);
@@ -202,47 +255,51 @@ function draw(d){
     } else msg('Không có dữ liệu ngày này.');
     return;
   }
-  var km=0,run=0,max=0,runs=[[]],raw=[],stopStart=null,GAP=5*60e3;
-  for(var i=0;i<p.length;i++){
-    var c=p[i],s=+c.spd||0;if(s>max&&(!c.acc||c.acc<=30))max=s;
-    if(i>0){
-      var a=p[i-1],dt=c.t-a.t,dk=dist(a,c),v=dt>0?dk/(dt/3600e3):0;
-      if(dt>GAP){runs.push([]);raw.push({a:a,b:c});}
-      else if(v<180){km+=dk;if(s>=5||(+a.spd||0)>=5)run+=dt;}
-    }
-    runs[runs.length-1].push(c);
-    var slow=s<5;
-    if(slow&&stopStart===null)stopStart=i;
-    if((!slow||i===p.length-1)&&stopStart!==null){raw.push({a:p[stopStart],b:p[i]});stopStart=null}   // a stop lasts until the car moves again
+  var p=D.p,sel=SEL>=0?D.trips[SEL]:null,t0=sel?sel.t0:-Infinity,t1=sel?sel.t1:Infinity;
+  // route: selected trip in speed colours, the rest of the day faded
+  if(sel){
+    D.trips.forEach(function(t,k){if(k!==SEL)L.polyline(smooth(t.pts,2).map(function(x){return[x.lat,x.lon]}),{color:'#8a9bbd',weight:4,opacity:.35}).addTo(layer)});
   }
+  var src=sel?sel.pts:p,runs=[[]];
+  for(var i=0;i<src.length;i++){if(i>0&&src[i].t-src[i-1].t>5*60e3)runs.push([]);runs[runs.length-1].push(src[i])}
   runs.forEach(drawRun);
-  // merge overlapping / near stops (less than 3 min apart, within 150 m), keep those ≥ 3 min
-  raw.sort(function(x,y){return x.a.t-y.a.t});
-  var stops=[];
-  raw.forEach(function(st){var q=stops[stops.length-1];
-    if(q&&st.a.t-q.b.t<180e3&&dist(q.a,st.a)<0.15){if(st.b.t>q.b.t)q.b=st.b}else stops.push({a:st.a,b:st.b})});
-  stops=stops.filter(function(st){return st.b.t-st.a.t>=180e3});
+  // stops inside the range (for the whole day: all of them)
+  var stops=D.stops.filter(function(st){return sel?(st.a.t>=t0&&st.b.t<=t1):true});
   stops.forEach(function(st){var m=st.a;items.push({t:m.t,ic:'P',bg:'#6b5bff',tx:'Dừng '+dur(st.b.t-st.a.t)+' ('+hm(st.a.t)+'–'+hm(st.b.t)+')',ll:[m.lat,m.lon]});
     L.marker([m.lat,m.lon],{icon:pin('#6b5bff','P')}).addTo(layer).bindPopup('<b>Dừng '+dur(st.b.t-st.a.t)+'</b><br>'+hm(st.a.t)+' – '+hm(st.b.t))});
   // events: coarse ones are pinned to the nearest clean point in time
-  all.forEach(function(c){if(!EV[c.ev])return;var ev=EV[c.ev],at=(c.acc&&c.acc>60)?nearest(p,c.t):c;
+  D.all.forEach(function(c){if(!EV[c.ev])return;if(c.t<t0-60e3||c.t>t1+60e3)return;var ev=EV[c.ev],at=(c.acc&&c.acc>60)?nearest(p,c.t):c;
     L.marker([at.lat,at.lon],{icon:pin(ev[0],ev[1])}).addTo(layer).bindPopup('<b>'+ev[2]+'</b><br>'+hm(c.t)+(c.dev?' · '+c.dev:''));
     items.push({t:c.t,ic:ev[1],bg:ev[0],tx:ev[2]+(c.ev==='QUA_TOC_DO'?' – '+(+c.spd||0)+' km/h':''),ll:[at.lat,at.lon]})});
-  var f=p[0],l=p[p.length-1];
-  L.marker([f.lat,f.lon],{icon:pin('#33d17a','A')}).addTo(layer).bindPopup('<b>Bắt đầu</b><br>'+hm(f.t));
-  L.marker([l.lat,l.lon],{icon:pin('#ff8a1e','B')}).addTo(layer).bindPopup('<b>Điểm cuối</b><br>'+hm(l.t)+(l.dev?' · '+l.dev:''));
-  items.push({t:f.t,ic:'A',bg:'#33d17a',tx:'Bắt đầu ghi',ll:[f.lat,f.lon]});
-  items.push({t:l.t,ic:'B',bg:'#ff8a1e',tx:'Điểm cuối',ll:[l.lat,l.lon]});
-  map.fitBounds(L.latLngBounds(p.map(function(x){return[x.lat,x.lon]})).pad(.15),{maxZoom:16});
-  $('sKm').textContent=km<10?km.toFixed(1)+' km':Math.round(km)+' km';
-  $('sRun').textContent=run?dur(run):'0 phút';
-  $('sMax').textContent=Math.round(max)+' km/h';
+  var f=src[0],l=src[src.length-1];
+  L.marker([f.lat,f.lon],{icon:pin('#33d17a','A')}).addTo(layer).bindPopup('<b>'+(sel?'Bắt đầu chuyến '+(SEL+1):'Bắt đầu')+'</b><br>'+hm(f.t));
+  L.marker([l.lat,l.lon],{icon:pin('#ff8a1e','B')}).addTo(layer).bindPopup('<b>'+(sel?'Kết thúc chuyến '+(SEL+1):'Điểm cuối')+'</b><br>'+hm(l.t)+(l.dev?' · '+l.dev:''));
+  items.push({t:f.t,ic:'A',bg:'#33d17a',tx:sel?'Bắt đầu chuyến '+(SEL+1):'Bắt đầu ghi',ll:[f.lat,f.lon]});
+  items.push({t:l.t,ic:'B',bg:'#ff8a1e',tx:sel?'Kết thúc chuyến '+(SEL+1):'Điểm cuối',ll:[l.lat,l.lon]});
+  if(fit)map.fitBounds(L.latLngBounds(src.map(function(x){return[x.lat,x.lon]})).pad(.15),{maxZoom:16});
+  // stats
+  var S=sel||D.day;
+  $('sKm').textContent=fmtKm(S.km);
+  $('sRun').textContent=S.run?dur(S.run):'0 phút';
+  $('sMax').textContent=Math.round(S.max)+' km/h';
   $('sStop').textContent=stops.length;
+  // trip cards
+  var T=D.trips;
+  $('trips').innerHTML=!T.length?'':'<h4>'+T.length+' chuyến trong ngày'+(sel?'<button id="tAll">Xem cả ngày</button>':'')+'</h4>'+T.map(function(t,k){
+    return '<div class="tr'+(k===SEL?' on':'')+'" data-k="'+k+'" style="border-left-color:'+TRIP_COLORS[k%TRIP_COLORS.length]+'">'
+      +'<div class="h">Chuyến '+(k+1)+'<span>'+hm(t.t0)+' → '+hm(t.t1)+'</span></div>'
+      +'<div class="d">'+fmtKm(t.km)+' · lái '+(t.run?dur(t.run):'0 phút')+' · TB '+Math.round(t.avg)+' · tối đa '+Math.round(t.max)+' km/h'
+      +(t.over?' · <span class="w">⚠ '+t.over+' lần quá tốc độ</span>':'')+'</div></div>'}).join('');
+  [].forEach.call($('trips').querySelectorAll('.tr'),function(el){el.onclick=function(){var k=+el.getAttribute('data-k');SEL=(SEL===k?-1:k);render(true);showMap()}});
+  if($('tAll'))$('tAll').onclick=function(){SEL=-1;render(true);showMap()};
+  // event list
   items.sort(function(a,b){return b.t-a.t});
   $('list').innerHTML=items.map(function(x,j){return '<div class="it" data-j="'+j+'"><i style="background:'+x.bg+'">'+x.ic+'</i>'+x.tx+'<span class="t">'+hm(x.t)+'</span></div>'}).join('')
-    +'<div class="msg">'+p.length+' điểm dùng để vẽ (bỏ '+(all.length-p.length)+' điểm sai lệch) · '+(dev||'tất cả thiết bị')+'</div>';
-  [].forEach.call($('list').querySelectorAll('.it'),function(el){el.onclick=function(){var x=items[+el.getAttribute('data-j')];map.setView(x.ll,17)}});
+    +'<div class="msg">'+p.length+' điểm dùng để vẽ (bỏ '+(D.all.length-p.length)+' điểm sai lệch) · '+(dev||'tất cả thiết bị')+'</div>';
+  [].forEach.call($('list').querySelectorAll('.it'),function(el){el.onclick=function(){var x=items[+el.getAttribute('data-j')];map.setView(x.ll,17);showMap()}});
 }
+// on phones the map sits above the panel: bring it into view after a tap
+function showMap(){if(window.innerWidth<900)$('mainmap').scrollIntoView({behavior:'smooth',block:'start'})}
 setChips();load();
 </script>
 </body>
